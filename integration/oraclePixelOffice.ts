@@ -23,11 +23,12 @@ import {
 } from '../server/src/assetLoader.js';
 import type { AssetCache } from '../server/src/clientMessageHandler.js';
 import type { AgentState } from '../server/src/types.js';
+import { readRawEvents } from './readRawEvents.js';
 
 type State = 'processing' | 'idle' | 'completed' | 'offline' | 'unknown';
 type Node = { id:string; name:string; session:string; window:string|null; provider:string; profile:string; status:State; callerId:string|null; kind:string; lastActive:string|null; terminalId:string|null };
 type SessionFile = { path:string; birth:number; modified:number; size:number; model:string; provider:'codex'|'claude' };
-type Entry = { node:Node; id:number; file:SessionFile|null; lastOffset:number; lineBuffer:string; activeTool:string|null; lastStatus:'active'|'waiting'|null; rawTurn:'active'|'waiting'|null; toolSequence:number };
+type Entry = { node:Node; id:number; file:SessionFile|null; lastOffset:number; lineBuffer:string; activeTool:string|null; activeToolName:string|null; model:string|null; effort:string|null; lastStatus:'active'|'waiting'|null; rawTurn:'active'|'waiting'|null; toolSequence:number };
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const DIST = path.join(ROOT,'dist');
 const HOME = os.homedir();
@@ -115,7 +116,7 @@ async function roster():Promise<Node[]>{
   }
   for(const t of raw) {
     if((t.session==='cao-aiva'||t.session==='cao-aiva-dev')&&!t.caller_id)continue;
-    nodes.push({id:`cao:${t.id}`,name:String(t.metadata?.display_name||t.metadata?.task_title||t.agent_profile||t.name||`Agent ${t.id}`),session:t.session,window:t.window??null,provider:t.provider||'codex',profile:t.agent_profile||'',status:t.status||'unknown',callerId:t.caller_id||null,kind:'worker',lastActive:t.last_active||null,terminalId:t.id});
+    nodes.push({id:`cao:${t.id}`,name:String(t.metadata?.display_name||t.metadata?.task_title||(t.agent_profile?.startsWith('aiva-native-') && t.session.startsWith('cao-aiva-agent-') ? t.session.slice('cao-aiva-agent-'.length).split('-').map(w=>w.toLowerCase()==='ci'?'CI':w.charAt(0).toUpperCase()+w.slice(1)).join(' ') : null)||t.agent_profile||t.name||`Agent ${t.id}`),session:t.session,window:t.window??null,provider:t.provider||'codex',profile:t.agent_profile||'',status:t.status||'unknown',callerId:t.caller_id||null,kind:'worker',lastActive:t.last_active||null,terminalId:t.id});
   }
   return nodes;
 }
@@ -130,6 +131,22 @@ function emptyAgent(id:number,node:Node,file:SessionFile|null):AgentState {
     // Reuse the ORIGINAL Pixel Agents character name labels; no custom scene.
     folderName:node.name,
   };
+}
+function currentModel(file:SessionFile):{model:string|null;effort:string|null}{
+  try{
+    const stat=fs.statSync(file.path),fd=fs.openSync(file.path,'r');
+    const len=Math.min(stat.size,8*1024*1024),buf=Buffer.alloc(len);
+    fs.readSync(fd,buf,0,len,stat.size-len);fs.closeSync(fd);
+    for(const line of buf.toString('utf8').split('\n').reverse()){
+      try{
+        const record=JSON.parse(line);
+        if(record.type==='turn_context' && typeof record.payload?.model==='string'){
+          return {model:record.payload.model,effort:typeof record.payload.effort==='string'?record.payload.effort:null};
+        }
+      }catch{}
+    }
+  }catch{}
+  return {model:null,effort:null};
 }
 function lastTurn(file:SessionFile):'active'|'waiting'|null{
   try{
@@ -154,24 +171,28 @@ function sendStatus(entry:Entry,status:'active'|'waiting',force=false):void{
 }
 function eventToTool(entry:Entry,record:Record<string,unknown>):void{
   const payload=(record.payload||{}) as Record<string,unknown>;
+  if(record.type==='turn_context'){
+    if(typeof payload.model==='string')entry.model=payload.model;
+    if(typeof payload.effort==='string')entry.effort=payload.effort;
+  }
   if(record.type==='response_item'){
     const type=payload.type;
     if(type==='custom_tool_call'||type==='function_call'){
       const toolName=String(payload.name||'Bash');
       const toolId=String(payload.call_id||`call-${entry.toolSequence++}`);
-      entry.activeTool=toolId;
+      entry.activeTool=toolId;entry.activeToolName=toolName;
       store.broadcast({type:'agentToolStart',id:entry.id,toolId,status:`Running ${toolName}`,toolName});
       sendStatus(entry,'active');
     }else if(type==='custom_tool_call_output'||type==='function_call_output'){
       const toolId=String(payload.call_id||entry.activeTool||'');
-      if(toolId){store.broadcast({type:'agentToolDone',id:entry.id,toolId});if(toolId===entry.activeTool)entry.activeTool=null}
+      if(toolId){store.broadcast({type:'agentToolDone',id:entry.id,toolId});if(toolId===entry.activeTool){entry.activeTool=null;entry.activeToolName=null}}
     }
   }else if(record.type==='event_msg'){
     const type=payload.type;
     if(type==='task_started'){
       entry.rawTurn='active';sendStatus(entry,'active');
     }else if(type==='task_complete'||type==='turn_aborted'){
-      entry.rawTurn='waiting';entry.activeTool=null;store.broadcast({type:'agentToolsClear',id:entry.id});sendStatus(entry,'waiting');
+      entry.rawTurn='waiting';entry.activeTool=null;entry.activeToolName=null;store.broadcast({type:'agentToolsClear',id:entry.id});sendStatus(entry,'waiting');
     }
   }
   // Complete, unredacted event is available to the owner in the live WebSocket.
@@ -205,13 +226,13 @@ async function refresh():Promise<void>{
       if(!entry){
         const id=node.id==='aiva'?1:node.id==='dev'?2:Math.max(3,...usedIds)+1;
         usedIds.add(id);
-        entry={id,node,file:linked,lastOffset:linked?fs.statSync(linked.path).size:0,activeTool:null,lastStatus:null,rawTurn:linked?lastTurn(linked):null,toolSequence:0,lineBuffer:''} as Entry & {lineBuffer:string};
+        entry={id,node,file:linked,lastOffset:linked?fs.statSync(linked.path).size:0,activeTool:null,activeToolName:null,...(linked?currentModel(linked):{model:null,effort:null}),lastStatus:null,rawTurn:linked?lastTurn(linked):null,toolSequence:0,lineBuffer:''} as Entry & {lineBuffer:string};
         entries.set(node.id,entry);
         store.set(id,emptyAgent(id,node,linked));
         console.log('[observer] connected',node.id,linked?path.basename(linked.path):'(no JSONL)');
       }else{
         entry.node=node;
-        if(!entry.file && linked){entry.file=linked;entry.lastOffset=fs.statSync(linked.path).size;entry.rawTurn=lastTurn(linked)}
+        if(!entry.file && linked){entry.file=linked;entry.lastOffset=fs.statSync(linked.path).size;entry.rawTurn=lastTurn(linked);Object.assign(entry,currentModel(linked))}
       }
       followFile(entry);
       let status:'active'|'waiting'=(node.status==='processing'||entry.rawTurn==='active')?'active':'waiting';
@@ -243,7 +264,7 @@ async function main(){
   await refresh();
   const {app,port}=await createHttpServer({
     embedded:false,host:'127.0.0.1',port:PORT,token:crypto.randomUUID(),store,readOnly:true,
-    staticDir:path.join(DIST,'webview'),assetCache,
+    staticDir:process.env.PIXEL_ORACLE_STATIC_DIR || path.join(DIST,'webview'),assetCache,
     onWebviewReady(send){
       wsConnections++;
       for(const e of entries.values()){
@@ -253,11 +274,22 @@ async function main(){
         // compatibility adapter, so real characters appear at their desks.
         send({type:'agentCreated',id:e.id,folderName:e.node.name,isExternal:true});
         if(e.lastStatus)send({type:'agentStatus',id:e.id,status:e.lastStatus});
-        if(e.activeTool)send({type:'agentToolStart',id:e.id,toolId:e.activeTool,status:'Running',toolName:'Bash'});
+        if(e.activeTool)send({type:'agentToolStart',id:e.id,toolId:e.activeTool,status:'Running',toolName:e.activeToolName||'Bash'});
       }
     },
     registerExtraRoutes(app){
-      app.get('/api/oracle/agents',async()=>({at:lastSnapshotAt,error:lastError,filesSeen:lastFileCount,agents:[...entries.values()].map(e=>({id:e.id,name:e.node.name,key:e.node.id,status:e.lastStatus,caoStatus:e.node.status,provider:e.node.provider,kind:e.node.kind,jsonl:e.file?path.basename(e.file.path):null,session:e.node.session,hasFullTranscript:!!e.file}))}));
+      app.get('/api/oracle/agents',async()=>({at:lastSnapshotAt,error:lastError,filesSeen:lastFileCount,agents:[...entries.values()].map(e=>({id:e.id,name:e.node.name,key:e.node.id,status:e.lastStatus,caoStatus:e.node.status,provider:e.node.provider,model:e.model,effort:e.effort,kind:e.node.kind,activity:e.activeToolName ? `Running ${e.activeToolName}` : e.lastStatus==='active' ? 'Working' : e.node.status==='completed' ? 'Completed' : e.node.status==='offline' ? 'Offline' : 'Waiting',jsonl:e.file?path.basename(e.file.path):null,session:e.node.session,hasFullTranscript:!!e.file}))}));
+      app.get<{Params:{id:string};Querystring:{before?:string;count?:string}}>('/api/oracle/events/:id',async(req,reply)=>{
+        const id=Number(req.params.id);
+        const entry=[...entries.values()].find(x=>x.id===id);
+        if(!entry?.file){reply.code(404).send({error:'Agent session file unavailable'});return}
+        const before=req.query.before===undefined?undefined:Number(req.query.before);
+        if(before!==undefined&&(!Number.isSafeInteger(before)||before<0)){
+          reply.code(400).send({error:'Invalid byte cursor'});return
+        }
+        reply.header('cache-control','no-store');
+        return {agentId:id,...readRawEvents(entry.file.path,before,Number(req.query.count||8))};
+      });
       app.get<{Params:{id:string}}>('/api/transcript/:id',async(req,reply)=>{
         const id=Number(req.params.id);const e=[...entries.values()].find(x=>x.id===id);
         if(!e?.file){reply.code(404).send('No transcript for this agent');return}

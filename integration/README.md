@@ -27,3 +27,34 @@ All tool arguments, prompts, session messages, reasoning records that actually a
 The observer served all six original character sheets, 38 original furniture assets, the upstream default layout, and displayed three characters corresponding to AIVA, Dev, and their current CAO worker. Chromium viewport capture and real macOS WebKit browser capture both verified the original pixel-art office rendering. The WebKit test exposed that `requestAnimationFrame` can be suspended in some contexts; the watchdog corrects that without replacing the renderer.
 
 See `evidence/original-pixel-webkit-watchdog.png`, `evidence/original-pixel-desktop.png` and `evidence/original-pixel-mobile.png`. Mac WebKit verification is not the same as verifying an actual physical iPhone; that still requires the iPhone to open the new tailnet link.
+
+### Adaptive phone and tablet layout (2026-10-21)
+
+The browser UI continues to use the original Pixel Agents canvas, animations,
+characters and assets, with a mobile-responsive header, a live CAO-backed agent
+carousel, fit-to-scene, touch pan, pinch zoom, and a full raw-activity drawer.
+
+The mobile camera computes bounds from occupied tiles, ignoring reserved VOID
+rows, and uses direct viewport measurement (not requestAnimationFrame) to fit
+the scene reliably on WebKit/Safari. The original rAF watchdog stays in place.
+
+GET /api/oracle/agents returns real CAO names, statuses, active tool activities,
+and session model/effort. GET /api/oracle/events/:id?count=8&before=<byte-cursor>
+returns exact full original JSONL records, with backward paging. No fields are
+redacted or abbreviated. GET /api/transcript/:id remains the complete raw
+JSONL transcript. The public repo contains code, never live transcripts.
+
+Build from the project root by running these commands:
+
+  cd webview-ui
+  npm run build -- --outDir ../dist/webview-mobile
+  cd ..
+
+Then start an isolated read-only observer:
+
+  TZ=America/Los_Angeles PIXEL_ORACLE_PORT=3217 PIXEL_ORACLE_STATIC_DIR=/home/ubuntu/mikeshaffer/work/agent-office-lab/repo/dist/webview-mobile node_modules/.bin/tsx integration/oraclePixelOffice.ts
+
+Mobile tests: run vitest against test/mobileViewport.test.ts from webview-ui.
+Raw record tests: node --test integration/readRawEvents.test.mjs.
+The existing live Tailscale URL remains http://100.109.117.48:3214/ after
+the final candidate is promoted. No changes to OfficeAdmin or AIVA.

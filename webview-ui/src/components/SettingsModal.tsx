@@ -17,6 +17,7 @@ interface SettingsModalProps {
   externalAssetDirectories: string[];
   watchAllSessions: boolean;
   onToggleWatchAllSessions: () => void;
+  readOnly?: boolean;
   hooksEnabled: boolean;
   onToggleHooksEnabled: () => void;
 }
@@ -33,11 +34,14 @@ export function SettingsModal({
   onToggleWatchAllSessions,
   hooksEnabled,
   onToggleHooksEnabled,
+  readOnly = false,
 }: SettingsModalProps) {
   const [soundLocal, setSoundLocal] = useState(isSoundEnabled);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Settings">
+    <Modal isOpen={isOpen} onClose={onClose} title="Settings" className={readOnly ? "mobile-readonly-settings" : ""}>
+      {readOnly && <div className="text-xs text-text-muted px-10 py-8">Read-only live office. Use the agent strip to inspect unfiltered activity.</div>}
+      {!readOnly && <>
       <MenuItem
         onClick={() => {
           transport.send({ type: 'openSessionsFolder' });
@@ -88,6 +92,7 @@ export function SettingsModal({
           </Button>
         </div>
       ))}
+      </>}
       <Checkbox
         label="Sound Notifications"
         checked={soundLocal}
@@ -98,21 +103,21 @@ export function SettingsModal({
           transport.send({ type: 'setSoundEnabled', enabled: newVal });
         }}
       />
-      <Checkbox
+      {!readOnly && <Checkbox
         label="Watch All Sessions"
         checked={watchAllSessions}
         onChange={onToggleWatchAllSessions}
-      />
-      <Checkbox
+      />}
+      {!readOnly && <Checkbox
         label="Instant Detection (Hooks)"
         checked={hooksEnabled}
         onChange={onToggleHooksEnabled}
-      />
-      <Checkbox
+      />}
+      {!readOnly && <Checkbox
         label="Always Show Labels"
         checked={alwaysShowOverlay}
         onChange={onToggleAlwaysShowOverlay}
-      />
+      />}
       <Checkbox label="Debug View" checked={isDebugMode} onChange={onToggleDebugMode} />
     </Modal>
   );

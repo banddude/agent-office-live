@@ -2,12 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>webview-ui</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#1e1e2e" />
+    <title>Pixel Agents · Live Office</title>
+    <style>
+      html, body, #root { width:100%;height:100%;margin:0;background:#1e1e2e;color:#eee; }
+      #initial-loading {display:flex;align-items:center;justify-content:center;height:100%;font:600 14px system-ui,sans-serif;}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div id="initial-loading">Connecting to the live office…</div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

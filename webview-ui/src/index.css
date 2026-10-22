@@ -93,6 +93,7 @@
   body,
   #root {
     @apply m-0 w-full h-full overflow-hidden font-pixel text-base text-text;
+    background-color: var(--color-bg);
   }
 
   * {

@@ -63,6 +63,19 @@ export function OfficeCanvas({
   const offsetRef = useRef({ x: 0, y: 0 });
   // Middle-mouse pan state (imperative, no re-renders)
   const isPanningRef = useRef(false);
+  // Coarse pointers use direct pan and pinch-zoom gestures. These do not
+  // modify the agent sessions or the office layout.
+  const touchGestureRef = useRef<{
+    lastX: number;
+    lastY: number;
+    startX: number;
+    startY: number;
+    initialDistance: number;
+    initialZoom: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressSyntheticClickUntilRef = useRef(0);
+
   const panStartRef = useRef({ mouseX: 0, mouseY: 0, panX: 0, panY: 0 });
   // Delete/rotate button bounds (updated each frame by renderer)
   const deleteButtonBoundsRef = useRef<DeleteButtonBounds | null>(null);
@@ -664,6 +677,7 @@ export function OfficeCanvas({
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
+      if (Date.now() < suppressSyntheticClickUntilRef.current) return;
       if (isEditMode) return; // handled by mouseDown/mouseUp
       const pos = screenToWorld(e.clientX, e.clientY);
       if (!pos) return;
@@ -781,6 +795,82 @@ export function OfficeCanvas({
     [isEditMode, officeState, screenToTile],
   );
 
+  const handleTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (isEditMode) return;
+    const touches = e.touches;
+    if (touches.length >= 2) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      touchGestureRef.current = {
+        lastX: (touches[0].clientX + touches[1].clientX) / 2,
+        lastY: (touches[0].clientY + touches[1].clientY) / 2,
+        startX: (touches[0].clientX + touches[1].clientX) / 2,
+        startY: (touches[0].clientY + touches[1].clientY) / 2,
+        initialDistance: Math.hypot(dx, dy),
+        initialZoom: zoom,
+        moved: true,
+      };
+    } else if (touches.length === 1) {
+      touchGestureRef.current = {
+        lastX: touches[0].clientX,
+        lastY: touches[0].clientY,
+        startX: touches[0].clientX,
+        startY: touches[0].clientY,
+        initialDistance: 0,
+        initialZoom: zoom,
+        moved: false,
+      };
+    }
+  }, [isEditMode, zoom]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (isEditMode) return;
+    const gesture = touchGestureRef.current;
+    if (!gesture) return;
+    if (e.touches.length >= 2 && gesture.initialDistance > 0) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const ratio = Math.hypot(dx, dy) / gesture.initialDistance;
+      const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(gesture.initialZoom * ratio)));
+      if (next !== zoom) onZoomChange(next);
+      gesture.moved = true;
+      return;
+    }
+    if (e.touches.length === 1 && gesture.initialDistance === 0) {
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      const dx = x - gesture.lastX;
+      const dy = y - gesture.lastY;
+      if (Math.abs(dx) + Math.abs(dy) > 0) {
+        const dpr = window.devicePixelRatio || 1;
+        officeState.cameraFollowId = null;
+        panRef.current = clampPan(panRef.current.x + dx * dpr, panRef.current.y + dy * dpr);
+      }
+      if (Math.hypot(x - gesture.startX, y - gesture.startY) > 5) gesture.moved = true;
+      gesture.lastX = x;
+      gesture.lastY = y;
+    }
+  }, [isEditMode, zoom, onZoomChange, officeState, panRef, clampPan]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    const gesture = touchGestureRef.current;
+    if (gesture?.moved) suppressSyntheticClickUntilRef.current = Date.now() + 450;
+    if (e.touches.length === 0) {
+      touchGestureRef.current = null;
+    } else if (e.touches.length === 1) {
+      // After a pinch, the remaining finger becomes a new pan gesture.
+      touchGestureRef.current = {
+        lastX: e.touches[0].clientX,
+        lastY: e.touches[0].clientY,
+        startX: e.touches[0].clientX,
+        startY: e.touches[0].clientY,
+        initialDistance: 0,
+        initialZoom: zoom,
+        moved: true,
+      };
+    }
+  }, [zoom]);
+
   // Wheel: Ctrl+wheel to zoom, plain wheel/trackpad to pan
   const handleWheel = useCallback(
     (e: WheelEvent) => {
@@ -834,6 +924,11 @@ export function OfficeCanvas({
         onAuxClick={handleAuxClick}
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        style={{ touchAction: isEditMode ? 'auto' : 'none' }}
         className="block"
       />
     </div>

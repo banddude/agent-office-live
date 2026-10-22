@@ -1,0 +1,80 @@
+/* Mobile interface layered AROUND the existing Pixel Agents canvas. */
+.mobile-office-shell {
+  width: 100%; height: 100%; height: 100dvh; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--color-bg-dark);
+  overscroll-behavior: none;
+}
+.mobile-office-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.mobile-office-header {
+  position: relative; z-index: 50; flex: 0 0 auto; min-height: 57px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 5px; padding: max(env(safe-area-inset-top, 0px), 6px) 10px 7px;
+  background: #222537; border-bottom: 2px solid #494b65;
+}
+.mobile-office-identity { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mobile-office-title {font: 700 13px/1.1 system-ui,-apple-system,sans-serif; letter-spacing: 0.075em; white-space: nowrap;color: #f3f2ff;}
+.mobile-office-live {font: 600 10px/1.2 system-ui,-apple-system,sans-serif; color:#adb2ce; white-space:nowrap;}
+.mobile-office-live-dot {width:7px;height:7px;border-radius:50%;background:#b5b1c3;display:inline-block;margin-right:4px;}
+.mobile-office-live-dot.is-connected {background:#65dbaa;box-shadow:0 0 0 2px #4ca78540;}
+.mobile-office-header-actions {display:flex;gap:3px;align-items:center;flex-shrink:0;}
+.mobile-office-button {
+  min-width: 35px; min-height: 38px; padding: 4px 7px;
+  background: #37394e; border: 1px solid #595c79; border-radius: 6px;
+  color: #f2efff; font: 700 18px/1 system-ui,-apple-system,sans-serif;
+  cursor:pointer; touch-action: manipulation;
+}
+.mobile-office-button:disabled {opacity:.35;cursor:default;}
+.mobile-office-button:active,.mobile-office-button:focus-visible { background: #585176;outline: 2px solid #9d8dff;outline-offset: -2px;}
+.mobile-office-button.fit-button {font-size: 10px;letter-spacing:0.04em;min-width:39px;}
+.mobile-office-button.settings-button {font-size:18px;}
+.mobile-office-zoom {font:600 11px system-ui,-apple-system,sans-serif;color:#bdbad1;min-width:24px;text-align:center;}
+.mobile-agent-dock {flex:0 0 auto;max-width:100%;border-top:2px solid #494b65;background:#222537;padding:10px 10px max(12px,env(safe-area-inset-bottom,12px));}
+.mobile-agent-dock-toolbar {display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px;}
+.mobile-agent-dock-title {color:#f7f6ff;font:700 12px system-ui,-apple-system,sans-serif;letter-spacing:.05em;}
+.mobile-agent-dock-title span {display:block;font:500 11px system-ui,-apple-system,sans-serif;letter-spacing:0;color:#9ca4bf;margin-top:3px;}
+.mobile-agent-events-button {background:#414263;color:#eae8ff;border:1px solid #666b91;border-radius:5px;min-height:34px;padding:6px 11px;font:700 11px system-ui,-apple-system,sans-serif;letter-spacing:.025em;white-space:nowrap;cursor:pointer;}
+.mobile-agent-events-button:disabled {opacity:.45;cursor:default;}
+.mobile-agent-track {display:flex;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:3px;touch-action:pan-x;}
+.mobile-agent-track::-webkit-scrollbar {display:none;}
+.mobile-agent-card {width:166px;min-height:74px;max-width:calc(100vw - 20px);display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:5px;padding:8px 9px 9px;border:1px solid #525a78;border-radius:8px;background:#2f334b;color:#fff;scroll-snap-align:start;cursor:pointer;touch-action:manipulation;}
+.mobile-agent-card.is-selected {border-color:#a499ff;background:#3d3d60;box-shadow:inset 0 0 0 1px #a499ff;}
+.mobile-agent-heading {display:flex;align-items:center;gap:7px;width:100%;min-width:0;}
+.mobile-agent-name {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 12px system-ui,-apple-system,sans-serif;}
+.mobile-agent-dot {flex-shrink:0;width:8px;height:8px;border-radius:50%;background:#a5a9b4;}
+.mobile-agent-dot.active {background:#54dea3;box-shadow:0 0 0 2px #54dea326;animation:pixel-pulse 1.6s infinite;}
+.mobile-agent-dot.waiting {background:#78abec;}.mobile-agent-dot.offline {background:#f38181;}
+.mobile-agent-activity {color:#d1d7ef;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:600 11px system-ui,-apple-system,sans-serif;}
+.mobile-agent-provider {color:#949ebf;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:500 10px system-ui,-apple-system,sans-serif;}
+.mobile-agent-empty {padding:14px;color:#adb1cc;font:13px system-ui,sans-serif;}
+.mobile-activity-backdrop {position:fixed;inset:0;background:#080a13ad;z-index:160;display:flex;align-items:flex-end;}
+.mobile-activity-sheet {display:flex;flex-direction:column;width:100%;max-height:93dvh;height:min(780px,93dvh);min-height:0;overflow:hidden;background:#1c2032;color:#eff2ff;border-radius:16px 16px 0 0;border-top:2px solid #6c6894;padding-bottom:env(safe-area-inset-bottom,0px);box-shadow:0 -10px 45px #0008;}
+.mobile-activity-header {display:flex;align-items:center;justify-content:space-between;padding:14px 15px 10px;border-bottom:1px solid #4b516f;gap:8px;}
+.mobile-activity-heading {display:flex;flex-direction:column;min-width:0;gap:5px;font-family:system-ui,sans-serif;}
+.mobile-activity-heading strong {font:700 16px system-ui,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mobile-activity-heading span {font:600 11px system-ui,sans-serif;color:#ada8d4;letter-spacing:.06em;}
+.mobile-activity-actions {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 15px;background:#24283e;}
+.mobile-activity-actions a,.mobile-activity-actions button {font:600 12px system-ui,sans-serif;color:#b9b1ff;background:none;border:0;text-decoration:underline;cursor:pointer;}
+.mobile-activity-scroll {overflow-y:auto;overscroll-behavior:contain;min-height:0;flex:1;padding:12px;}
+.mobile-activity-record {background:#2a2e42;border:1px solid #494e70;border-radius:7px;margin-bottom:8px;overflow:hidden;}
+.mobile-activity-record summary {display:flex;flex-direction:column;gap:6px;cursor:pointer;padding:11px 12px;font:700 12px/1.4 system-ui,sans-serif;overflow-wrap:anywhere;}
+.mobile-activity-record summary small {font:500 10px/1.2 system-ui,sans-serif;color:#b2b8d3;}
+.mobile-activity-record[open] summary {border-bottom:1px solid #525873;}
+.mobile-activity-record pre {margin:0;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;color:#d7f0de;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;user-select:text;}
+.mobile-load-older {width:100%;padding:13px;background:#3b415a;color:#ebedff;border:1px solid #727597;border-radius:8px;font:600 13px system-ui,sans-serif;cursor:pointer;}
+.mobile-activity-error {padding:12px;background:#572e40;color:#ffe1e7;font:12px system-ui,sans-serif;}
+.mobile-activity-empty {padding:22px;text-align:center;color:#aeb7d0;font:12px system-ui,sans-serif;}
+/* Short landscape displays reserve space for the game instead of the roster. */
+@media (orientation: landscape) and (max-height:520px) {
+  .mobile-office-header {padding-top:4px;padding-bottom:4px;min-height:42px;}
+  .mobile-office-live {display:none;}
+  .mobile-agent-dock {padding-top:5px;padding-bottom:5px;}
+  .mobile-agent-dock-toolbar {margin-bottom:4px;}
+  .mobile-agent-dock-title span {display:none;}
+  .mobile-agent-card {min-height:45px;padding:5px 8px;gap:3px;}
+  .mobile-agent-provider {display:none;}
+  .mobile-agent-track {gap:6px;}
+}
+@media (prefers-reduced-motion: reduce) { .mobile-agent-dot.active {animation:none;} }
+
+.mobile-readonly-settings {width: min(440px,calc(100vw - 24px));min-width:0 !important;max-height:calc(100dvh - 40px);overflow-y:auto;overscroll-behavior:contain;}

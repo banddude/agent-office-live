@@ -11,6 +11,10 @@ import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { ZoomControls } from './components/ZoomControls.js';
+import { MobileAgentDock, MobileOfficeHeader, MobileRawActivity, useLiveOracleAgents } from './mobile/MobileOfficeUI.js';
+import type { LiveOracleAgent } from './mobile/MobileOfficeUI.js';
+import { useMobileLayout } from './mobile/useMobileLayout.js';
+import { fitVisibleOffice } from './mobile/viewport.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
@@ -55,6 +59,12 @@ function App() {
   }, []);
 
   const editor = useEditorActions(getOfficeState, editorState);
+  const isMobile = useMobileLayout();
+  const liveOracle = useLiveOracleAgents(isBrowserRuntime && isMobile);
+  const [autoFitEnabled, setAutoFitEnabled] = useState(true);
+  const fitCameraRef = useRef({zoom:1,panX:0,panY:0});
+  const [mobileSelectedId, setMobileSelectedId] = useState<number | null>(null);
+  const [mobileEventsOpen, setMobileEventsOpen] = useState(false);
 
   const isEditDirty = useCallback(
     () => editor.isEditMode && editor.isDirty,
@@ -125,6 +135,70 @@ function App() {
 
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Canvas drawing is measured in DEVICE pixels. A density-based desktop zoom
+  // crops most of the office on iPhone: calculate a true scene fit instead.
+  // ResizeObserver makes it responsive to Safari browser chrome, rotation,
+  // and changes in the available area above the mobile agent dock.
+  useEffect(() => {
+    if (!isMobile || !layoutReady) return;
+    const viewport = containerRef.current;
+    if (!viewport) return;
+    let delayedFit: ReturnType<typeof setTimeout> | null = null;
+    const fit = () => {
+      const rect = viewport.getBoundingClientRect();
+      if (rect.width < 20 || rect.height < 20) return;
+      const layout = getOfficeState().getLayout();
+      const next = fitVisibleOffice(rect.width, rect.height, window.devicePixelRatio || 1, layout);
+      fitCameraRef.current = next;
+      if (autoFitEnabled) {
+        editor.handleZoomChange(next.zoom);
+        editor.panRef.current = { x: next.panX, y: next.panY };
+        getOfficeState().cameraFollowId = null;
+      }
+    };
+    const schedule = () => {
+      // WebKit can throttle/suspend requestAnimationFrame even while this view
+      // is onscreen. Compute the layout immediately, then once more after
+      // Safari's address-bar/rotation resize settles.
+      fit();
+      if (delayedFit !== null) window.clearTimeout(delayedFit);
+      delayedFit = window.setTimeout(fit, 90);
+    };
+    const observer = new ResizeObserver(schedule);
+    observer.observe(viewport);
+    schedule();
+    window.addEventListener('orientationchange', schedule);
+    window.visualViewport?.addEventListener('resize', schedule);
+    return () => {
+      observer.disconnect();
+      if (delayedFit !== null) window.clearTimeout(delayedFit);
+      window.removeEventListener('orientationchange', schedule);
+      window.visualViewport?.removeEventListener('resize', schedule);
+    };
+  }, [isMobile, layoutReady, autoFitEnabled, editor.handleZoomChange, editor.panRef]);
+
+  const handleMobileZoom = useCallback((value: number) => {
+    setAutoFitEnabled(false);
+    editor.handleZoomChange(value);
+    getOfficeState().cameraFollowId = null;
+  }, [editor.handleZoomChange]);
+
+  const handleFitOffice = useCallback(() => {
+    getOfficeState().cameraFollowId = null;
+    editor.panRef.current = {x:fitCameraRef.current.panX,y:fitCameraRef.current.panY};
+    editor.handleZoomChange(fitCameraRef.current.zoom);
+    setAutoFitEnabled(true);
+  }, [editor.handleZoomChange, editor.panRef]);
+
+  const handleMobileAgentSelect = useCallback((id: number) => {
+    setMobileSelectedId(id);
+    const state = getOfficeState();
+    state.selectedAgentId = id;
+    // A whole-office view should not suddenly pan away when a chip is tapped.
+    state.cameraFollowId = null;
+  }, []);
+
+
   const [editorTickForKeyboard, setEditorTickForKeyboard] = useState(0);
   useEditorKeyboard(
     editor.isEditMode,
@@ -152,6 +226,22 @@ function App() {
 
   const officeState = getOfficeState();
 
+  // OfficeAdmin/CAO is authoritative on Oracle. Other standalone Pixel Agents
+  // deployments can still use their upstream WebSocket agent list as fallback.
+  const mobileAgents: LiveOracleAgent[] = liveOracle.agents.length > 0 ? liveOracle.agents : agents.map(id => ({
+    id,
+    key: `upstream:${id}`,
+    name: officeState.characters.get(id)?.folderName || `Agent ${id}`,
+    status: agentStatuses[id] === 'waiting' ? 'waiting' : 'unknown',
+    caoStatus: 'unknown',
+    provider: 'Agent',
+    kind: 'session',
+    hasFullTranscript: false,
+  }));
+  const workingMobileAgents = mobileAgents.filter(agent => agent.status === 'active').length;
+  const inspectedAgent = mobileAgents.find(agent => agent.id === mobileSelectedId) || mobileAgents[0];
+
+
   // Force dependency on editorTickForKeyboard to propagate keyboard-triggered re-renders
   void editorTickForKeyboard;
 
@@ -175,14 +265,26 @@ function App() {
     })();
 
   if (!layoutReady) {
-    return <div className="w-full h-full flex items-center justify-center ">Loading...</div>;
+    return <div className="w-full h-full flex items-center justify-center bg-bg text-text" role="status">Loading Pixel Agents office…</div>;
   }
 
   return (
-    <div ref={containerRef} className="w-full h-full relative overflow-hidden">
+    <div className={isMobile ? 'mobile-office-shell' : 'w-full h-full relative overflow-hidden'} data-testid="agent-office-shell">
+      {isMobile && (
+        <MobileOfficeHeader
+          working={workingMobileAgents}
+          connected={liveOracle.connected}
+          zoom={editor.zoom}
+          onFit={handleFitOffice}
+          onZoomIn={() => handleMobileZoom(editor.zoom + 1)}
+          onZoomOut={() => handleMobileZoom(editor.zoom - 1)}
+          onSettings={() => setIsSettingsOpen(value => !value)}
+        />
+      )}
+      <div ref={containerRef} className={isMobile ? 'mobile-office-stage' : 'absolute inset-0 overflow-hidden'} data-testid="office-viewport">
       <OfficeCanvas
         officeState={officeState}
-        onClick={handleClick}
+        onClick={isMobile ? handleMobileAgentSelect : handleClick}
         isEditMode={editor.isEditMode}
         editorState={editorState}
         onEditorTileAction={editor.handleEditorTileAction}
@@ -199,7 +301,7 @@ function App() {
 
       {!isDebugMode ? (
         <>
-          <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />
+          {!isMobile && <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />}
 
           {/* Vignette overlay */}
           <div
@@ -260,7 +362,7 @@ function App() {
             zoom={editor.zoom}
             panRef={editor.panRef}
             onCloseAgent={handleCloseAgent}
-            alwaysShowOverlay={alwaysShowOverlay}
+            alwaysShowOverlay={!isMobile && alwaysShowOverlay}
           />
         </>
       ) : (
@@ -272,6 +374,22 @@ function App() {
           subagentTools={subagentTools}
           officeState={officeState}
           onSelectAgent={handleSelectAgent}
+        />
+      )}
+
+      </div>
+      {isMobile && (
+        <MobileAgentDock
+          agents={mobileAgents}
+          connected={liveOracle.connected}
+          selectedAgentId={mobileSelectedId}
+          onSelect={handleMobileAgentSelect}
+          onEvents={() => {
+            if (inspectedAgent) {
+              handleMobileAgentSelect(inspectedAgent.id);
+              setMobileEventsOpen(true);
+            }
+          }}
         />
       )}
 
@@ -333,21 +451,21 @@ function App() {
         </div>
       </Modal>
 
-      <BottomToolbar
+      {!isMobile && <BottomToolbar
         isEditMode={editor.isEditMode}
         onOpenClaude={editor.handleOpenClaude}
         onToggleEditMode={editor.handleToggleEditMode}
         isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
-      />
+      />}
 
-      <VersionIndicator
+      {!isMobile && <VersionIndicator
         currentVersion={extensionVersion}
         lastSeenVersion={lastSeenVersion}
         onDismiss={handleWhatsNewDismiss}
         onOpenChangelog={handleOpenChangelog}
-      />
+      />}
 
       <ChangelogModal
         isOpen={isChangelogOpen}
@@ -370,6 +488,7 @@ function App() {
           transport.send({ type: 'setWatchAllSessions', enabled: newVal });
         }}
         hooksEnabled={hooksEnabled}
+        readOnly={isMobile && isBrowserRuntime}
         onToggleHooksEnabled={() => {
           const newVal = !hooksEnabled;
           setHooksEnabled(newVal);
@@ -379,6 +498,13 @@ function App() {
 
       {showMigrationNotice && (
         <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
+      )}
+      {isMobile && mobileEventsOpen && inspectedAgent && (
+        <MobileRawActivity
+          key={inspectedAgent.id}
+          agent={inspectedAgent}
+          onClose={() => setMobileEventsOpen(false)}
+        />
       )}
     </div>
   );
