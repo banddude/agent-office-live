@@ -26,6 +26,7 @@ export interface ClientMessageContext {
   cache: AssetCache | null;
   /** Install/uninstall hooks side effect. Needs server url+token known only to cli.ts. */
   onSetHooksEnabled?: SetHooksEnabledSideEffect;
+  readOnly?: boolean;
 }
 
 // ── Setting key constants (mirror adapters/vscode/constants.ts) ──
@@ -178,13 +179,13 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   const hooksEnabled = adapter?.getSetting(KEY_HOOKS_ENABLED, true) ?? true;
   send({
     type: 'settingsLoaded',
-    soundEnabled: adapter?.getSetting(KEY_SOUND_ENABLED, true) ?? true,
+    soundEnabled: ctx.readOnly ? false : (adapter?.getSetting(KEY_SOUND_ENABLED, true) ?? true),
     lastSeenVersion: adapter?.getSetting(KEY_LAST_SEEN_VERSION, '') ?? '',
     extensionVersion: process.env.PIXEL_AGENTS_VERSION ?? '',
     watchAllSessions,
-    alwaysShowLabels: adapter?.getSetting(KEY_ALWAYS_SHOW_LABELS, false) ?? false,
-    hooksEnabled,
-    hooksInfoShown: adapter?.getSetting(KEY_HOOKS_INFO_SHOWN, false) ?? false,
+    alwaysShowLabels: ctx.readOnly ? true : (adapter?.getSetting(KEY_ALWAYS_SHOW_LABELS, false) ?? false),
+    hooksEnabled: ctx.readOnly ? false : hooksEnabled,
+    hooksInfoShown: ctx.readOnly ? true : adapter?.getSetting(KEY_HOOKS_INFO_SHOWN, false) ?? false,
     externalAssetDirectories: cfg.externalAssetDirectories,
   });
 

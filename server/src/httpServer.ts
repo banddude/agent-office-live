@@ -34,6 +34,12 @@ export interface HttpServerOptions {
   onHookEvent?: (providerId: string, event: Record<string, unknown>) => void;
   /** Invoked when setHooksEnabled is toggled via WebSocket. Standalone installs/uninstalls hooks here. */
   onSetHooksEnabled?: SetHooksEnabledSideEffect;
+  /** Read-only external agents: no writes, hook installation, or control actions. */
+  readOnly?: boolean;
+  /** External observer may register read-only APIs before Fastify listens. */
+  registerExtraRoutes?: (app: FastifyInstance) => void;
+  /** Sync existing external agent status on each new browser connection. */
+  onWebviewReady?: (send: (message: Record<string, unknown>) => void) => void;
 }
 
 /** Result of createHttpServer(). */
@@ -76,6 +82,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerHealthRoute(app);
   registerHookRoute(app, options);
   registerWebSocketRoute(app, options);
+  options.registerExtraRoutes?.(app);
 
   // ── Listen ──────────────────────────────────────────────────
 
@@ -183,12 +190,15 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
         if (!options.embedded && msg.type) {
           console.log('[Pixel Agents] WS client message:', msg.type);
         }
+        if (options.readOnly && msg.type !== 'webviewReady') return;
         handleClientMessage(msg, (m) => safeSend(socket, m), {
           store,
           runtime: options.runtime,
           cache: options.assetCache ?? null,
           onSetHooksEnabled: options.onSetHooksEnabled,
+          readOnly: options.readOnly,
         });
+        if (msg.type === 'webviewReady') options.onWebviewReady?.((m) => safeSend(socket, m));
       } catch {
         // Malformed JSON, ignore
       }
