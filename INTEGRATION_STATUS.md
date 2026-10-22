@@ -24,3 +24,15 @@ No OfficeAdmin writes, no CAO actions, no agent messages, no production restarts
 - Safari/WebKit auto-fit no longer depends on requestAnimationFrame
 - Tested in Chromium phone/tablet viewports and macOS WebKit over Tailscale
 - Physical iPhone Safari remains separately unverified from automation
+
+## Agent desk close-up
+
+A selectable, pixel-art over-the-shoulder view was added using the original
+Pixel Agents character sprite atlas. Desktop agent click and mobile agent-card
+selection enter the close-up. The monitor shows actual recorded tool arguments
+and output without truncating them. Thinking bubbles are sourced only from
+available reasoning summaries/status events; encrypted reasoning is labeled
+unreadable. Messages and full raw JSONL remain accessible.
+
+The detail view does not control or change AIVA, Dev, CAO, or OfficeAdmin and
+is not a literal VNC or screen capture of the agent's applications.

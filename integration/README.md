@@ -58,3 +58,28 @@ Mobile tests: run vitest against test/mobileViewport.test.ts from webview-ui.
 Raw record tests: node --test integration/readRawEvents.test.mjs.
 The existing live Tailscale URL remains http://100.109.117.48:3214/ after
 the final candidate is promoted. No changes to OfficeAdmin or AIVA.
+
+### Agent desk close-up (over-the-shoulder view)
+
+On a mobile-sized screen, tap an agent in the bottom carousel to open a
+close-up of that agent's desk. On desktop, click an existing office character.
+The primary office, asset pipeline and animation engine are still those of the
+original Pixel Agents project. The new close-up reuses its original back-facing
+character sprites (row two of the sprite atlas), with a simulated monitor.
+
+The monitor reflects *recorded* JSONL, not a real screen recording or an
+unavailable remote application: the Screen tab shows the latest recorded tool
+name, full input and any matching output. The Messages tab shows a complete
+recorded message. The Thinking tab shows a readable reasoning summary only
+when the provider actually wrote one; when reasoning is encrypted, the bubble
+and tab explicitly state that no readable reasoning is available. The viewer
+does not invent thoughts or attempt to decrypt the provider's data.
+
+The entire original JSONL remains accessible via Raw Activity. The close-up
+polls only the selected agent's existing read-only events endpoint, switches
+sessions when a different agent is chosen, and closes back to the main office.
+On short screens the close-up uses the full viewport for monitor legibility.
+
+Source: webview-ui/src/mobile/AgentDeskFocus.tsx,
+webview-ui/src/mobile/useDeskFeed.ts, webview-ui/src/mobile/deskEvents.ts.
+Test: cd webview-ui && npx vitest run test/deskEvents.test.ts.

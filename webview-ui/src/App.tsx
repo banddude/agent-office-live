@@ -11,13 +11,14 @@ import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { ZoomControls } from './components/ZoomControls.js';
-import { MobileAgentDock, MobileOfficeHeader, MobileRawActivity, useLiveOracleAgents } from './mobile/MobileOfficeUI.js';
-import type { LiveOracleAgent } from './mobile/MobileOfficeUI.js';
-import { useMobileLayout } from './mobile/useMobileLayout.js';
-import { fitVisibleOffice } from './mobile/viewport.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
+import { AgentDeskFocus } from './mobile/AgentDeskFocus.js';
+import type { LiveOracleAgent } from './mobile/MobileOfficeUI.js';
+import { MobileAgentDock, MobileOfficeHeader, MobileRawActivity, useLiveOracleAgents } from './mobile/MobileOfficeUI.js';
+import { useMobileLayout } from './mobile/useMobileLayout.js';
+import { fitVisibleOffice } from './mobile/viewport.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
@@ -59,11 +60,16 @@ function App() {
   }, []);
 
   const editor = useEditorActions(getOfficeState, editorState);
+  // These are stable callbacks/refs from useEditorActions. Avoid depending on
+  // its newly constructed return object each render.
+  const editorZoomChange = editor.handleZoomChange;
+  const editorPanRef = editor.panRef;
   const isMobile = useMobileLayout();
-  const liveOracle = useLiveOracleAgents(isBrowserRuntime && isMobile);
+  const liveOracle = useLiveOracleAgents(isBrowserRuntime);
   const [autoFitEnabled, setAutoFitEnabled] = useState(true);
   const fitCameraRef = useRef({zoom:1,panX:0,panY:0});
   const [mobileSelectedId, setMobileSelectedId] = useState<number | null>(null);
+  const [deskFocusId, setDeskFocusId] = useState<number | null>(null);
   const [mobileEventsOpen, setMobileEventsOpen] = useState(false);
 
   const isEditDirty = useCallback(
@@ -151,8 +157,8 @@ function App() {
       const next = fitVisibleOffice(rect.width, rect.height, window.devicePixelRatio || 1, layout);
       fitCameraRef.current = next;
       if (autoFitEnabled) {
-        editor.handleZoomChange(next.zoom);
-        editor.panRef.current = { x: next.panX, y: next.panY };
+        editorZoomChange(next.zoom);
+        editorPanRef.current = { x: next.panX, y: next.panY };
         getOfficeState().cameraFollowId = null;
       }
     };
@@ -175,27 +181,30 @@ function App() {
       window.removeEventListener('orientationchange', schedule);
       window.visualViewport?.removeEventListener('resize', schedule);
     };
-  }, [isMobile, layoutReady, autoFitEnabled, editor.handleZoomChange, editor.panRef]);
+  }, [isMobile, layoutReady, autoFitEnabled, editorZoomChange, editorPanRef]);
 
   const handleMobileZoom = useCallback((value: number) => {
     setAutoFitEnabled(false);
-    editor.handleZoomChange(value);
+    editorZoomChange(value);
     getOfficeState().cameraFollowId = null;
-  }, [editor.handleZoomChange]);
+  }, [editorZoomChange]);
 
   const handleFitOffice = useCallback(() => {
+    setDeskFocusId(null);
     getOfficeState().cameraFollowId = null;
-    editor.panRef.current = {x:fitCameraRef.current.panX,y:fitCameraRef.current.panY};
-    editor.handleZoomChange(fitCameraRef.current.zoom);
+    editorPanRef.current = {x:fitCameraRef.current.panX,y:fitCameraRef.current.panY};
+    editorZoomChange(fitCameraRef.current.zoom);
     setAutoFitEnabled(true);
-  }, [editor.handleZoomChange, editor.panRef]);
+  }, [editorZoomChange, editorPanRef]);
 
   const handleMobileAgentSelect = useCallback((id: number) => {
     setMobileSelectedId(id);
     const state = getOfficeState();
     state.selectedAgentId = id;
-    // A whole-office view should not suddenly pan away when a chip is tapped.
     state.cameraFollowId = null;
+    // Tap an agent card to enter their desk close-up. The office continues
+    // animating underneath and the dock remains available to switch agents.
+    setDeskFocusId(id);
   }, []);
 
 
@@ -217,12 +226,18 @@ function App() {
   }, []);
 
   const handleClick = useCallback((agentId: number) => {
-    // If clicked agent is a sub-agent, focus the parent's terminal instead
     const os = getOfficeState();
     const meta = os.subagentMeta.get(agentId);
     const focusId = meta ? meta.parentAgentId : agentId;
-    transport.send({ type: 'focusAgent', id: focusId });
-  }, []);
+    if (liveOracle.connected && liveOracle.agents.some(agent => agent.id === focusId)) {
+      setMobileSelectedId(focusId);
+      setDeskFocusId(focusId);
+      os.cameraFollowId = null;
+    } else {
+      // Preserve the normal VS Code/Codex plugin focus behavior.
+      transport.send({ type: 'focusAgent', id: focusId });
+    }
+  }, [liveOracle.connected, liveOracle.agents]);
 
   const officeState = getOfficeState();
 
@@ -240,6 +255,14 @@ function App() {
   }));
   const workingMobileAgents = mobileAgents.filter(agent => agent.status === 'active').length;
   const inspectedAgent = mobileAgents.find(agent => agent.id === mobileSelectedId) || mobileAgents[0];
+  const focusedAgent = deskFocusId === null ? null : mobileAgents.find(agent => agent.id === deskFocusId) || null;
+  const focusedCharacter = focusedAgent ? officeState.characters.get(focusedAgent.id) : null;
+  const closeDeskFocus = () => {
+    setDeskFocusId(null);
+    officeState.selectedAgentId = null;
+    officeState.cameraFollowId = null;
+  };
+
 
 
   // Force dependency on editorTickForKeyboard to propagate keyboard-triggered re-renders
@@ -377,6 +400,20 @@ function App() {
         />
       )}
 
+        {focusedAgent && (
+          <AgentDeskFocus
+            key={focusedAgent.key}
+            mobile={isMobile}
+            agent={focusedAgent}
+            palette={focusedCharacter?.palette ?? 0}
+            hueShift={focusedCharacter?.hueShift ?? 0}
+            onClose={closeDeskFocus}
+            onRaw={() => {
+              setMobileSelectedId(focusedAgent.id);
+              setMobileEventsOpen(true);
+            }}
+          />
+        )}
       </div>
       {isMobile && (
         <MobileAgentDock
@@ -499,7 +536,7 @@ function App() {
       {showMigrationNotice && (
         <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
       )}
-      {isMobile && mobileEventsOpen && inspectedAgent && (
+      {mobileEventsOpen && inspectedAgent && (
         <MobileRawActivity
           key={inspectedAgent.id}
           agent={inspectedAgent}
